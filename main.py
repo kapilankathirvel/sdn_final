@@ -1,6 +1,6 @@
 # File: main.py
 from flow import VideoStream, FileDownload
-from router import FIFORouter, QoSRouter
+from router import FIFORouter, PQRouter, WFQRouter # Import all three
 from statistics import StatisticsCollector, plot_results
 
 # --- 1. Simulation Constants ---
@@ -15,7 +15,7 @@ CONGESTION_END = 25
 VIDEO_BITRATE_MBPS = 5
 DOWNLOAD_PACKET_INTERVAL = 0.001 # 12 Mbps download
 
-# --- 2. The Simulation Function ---
+# --- 2. The Simulation Function (Unchanged) ---
 
 def run_simulation(router, stats_collector, all_packets, link_bps):
     """
@@ -26,57 +26,45 @@ def run_simulation(router, stats_collector, all_packets, link_bps):
     packet_index = 0
     total_packets = len(all_packets)
 
-    # This loop is the "simulation time"
     while packet_index < total_packets or router.has_packets():
         
-        # Step A: Fill the router's queues with all packets that have "arrived"
-        # by the time the link is free.
+        # Step A: Fill router's queues
         while packet_index < total_packets:
             packet = all_packets[packet_index]
             if packet.arrival_time_sec <= link_free_at_time:
                 router.add_packet(packet)
                 packet_index += 1
             else:
-                # This packet arrives in the future, stop filling
                 break
         
-        # Step B: Get the next packet from the router's logic
+        # Step B: Get next packet from router
         packet_to_send = router.get_next_packet()
 
         if packet_to_send:
-            # We have a packet, process it
+            # Process the packet
             arrival_time = packet_to_send.arrival_time_sec
-            
-            # When does it *start* transmitting?
             start_time = max(arrival_time, link_free_at_time)
-            
             transmit_duration = packet_to_send.size_bytes / link_bps
             finish_time = start_time + transmit_duration
-            
-            # The link is now busy until this packet finishes
             link_free_at_time = finish_time
             
-            # Log stats if it's a video packet
             if packet_to_send.flow_type == 'VIDEO':
                 stats_collector.log_video_latency(arrival_time, finish_time)
         
         elif packet_index < total_packets:
-            # Queues are empty, but more packets are coming.
-            # "Jump" time forward to the next packet's arrival
-            # to avoid an infinite loop.
+            # Queues are empty, jump time
             link_free_at_time = all_packets[packet_index].arrival_time_sec
         
         else:
-            # No packets to send, and no more to arrive. We are done.
             break
 
-# --- 3. Main Execution ---
+# --- 3. Main Execution (UPDATED) ---
 
 if __name__ == "__main__":
     
     print("Starting simulation setup...")
     
-    # Step 1: Create the traffic flows
+    # Step 1: Create flows (Unchanged)
     video_flow = VideoStream(
         flow_id="video_1",
         bitrate_mbps=VIDEO_BITRATE_MBPS,
@@ -90,11 +78,9 @@ if __name__ == "__main__":
         interval_sec=DOWNLOAD_PACKET_INTERVAL
     )
     
-    # Step 2: Generate all packets for the *entire* simulation
+    # Step 2: Generate all packets (Unchanged)
     all_packets = video_flow.generate_packets(SIMULATION_TIME_SEC) + \
                   download_flow.generate_packets(SIMULATION_TIME_SEC)
-                  
-    # Sort them by arrival time to create the master event list
     all_packets.sort(key=lambda p: p.arrival_time_sec)
     
     print(f"Generated {len(all_packets)} total packets.")
@@ -105,14 +91,27 @@ if __name__ == "__main__":
     fifo_stats = StatisticsCollector()
     run_simulation(fifo_router, fifo_stats, list(all_packets), LINK_BANDWIDTH_BPS)
 
-    # --- Run Solution (QoS) Simulation ---
-    print("Running Solution (QoS) simulation...")
-    qos_router = QoSRouter()
-    qos_stats = StatisticsCollector()
-    run_simulation(qos_router, qos_stats, list(all_packets), LINK_BANDWIDTH_BPS)
+    # --- Run Priority (PQ) Simulation ---
+    print("Running Priority Queuing (PQ) simulation...")
+    pq_router = PQRouter()
+    pq_stats = StatisticsCollector()
+    run_simulation(pq_router, pq_stats, list(all_packets), LINK_BANDWIDTH_BPS)
+    
+    # --- Run Weighted Fair Queuing (WFQ) Simulation ---
+    print("Running Weighted Fair Queuing (WFQ) simulation...")
+    wfq_router = WFQRouter(video_weight=7, download_weight=3) # We can pass in weights!
+    wfq_stats = StatisticsCollector()
+    run_simulation(wfq_router, wfq_stats, list(all_packets), LINK_BANDWIDTH_BPS)
     
     # --- Plot Results ---
     print("Generating plot...")
-    plot_results(fifo_stats, qos_stats, (CONGESTION_START, CONGESTION_END))
+    plot_results(
+        [
+            ('FIFO', fifo_stats),
+            ('PQ', pq_stats),
+            ('WFQ', wfq_stats)
+        ],
+        (CONGESTION_START, CONGESTION_END)
+    )
     
     print("Simulation complete.")

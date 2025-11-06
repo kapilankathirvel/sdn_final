@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 class StatisticsCollector:
     """Collects and plots simulation data."""
     def __init__(self):
-        # We will store (arrival_time, latency_ms) tuples
         self.video_latencies = []
 
     def log_video_latency(self, arrival_time, finish_time):
@@ -18,31 +17,39 @@ class StatisticsCollector:
         total_latency = sum(latency for time, latency in self.video_latencies)
         return total_latency / len(self.video_latencies)
 
-def plot_results(fifo_stats, qos_stats, congestion_period):
+# --- UPDATED THIS FUNCTION ---
+def plot_results(stats_list, congestion_period):
     """
     Uses Matplotlib to plot the final results.
-    'fifo_stats' and 'qos_stats' are StatisticsCollector objects.
+    'stats_list' is a list of tuples: [('Label', stats_collector), ...]
     """
     
-    # Unzip the data for plotting
-    fifo_x = [d[0] for d in fifo_stats.video_latencies]
-    fifo_y = [d[1] for d in fifo_stats.video_latencies]
-    
-    qos_x = [d[0] for d in qos_stats.video_latencies]
-    qos_y = [d[1] for d in qos_stats.video_latencies]
-    
-    avg_fifo = fifo_stats.get_average_video_latency()
-    avg_qos = qos_stats.get_average_video_latency()
+    plt.figure(figsize=(12, 7))
+    colors = ['red', 'blue', 'green', 'purple', 'orange']
     
     print(f"\n--- Results ---")
-    print(f"Baseline (FIFO) Average Video Latency: {avg_fifo:.2f} ms")
-    print(f"Solution (QoS) Average Video Latency:  {avg_qos:.2f} ms")
     
-    plt.figure(figsize=(12, 7))
+    # Track the highest Y-value for a clean plot
+    max_y_seen = 0.0
     
-    plt.scatter(fifo_x, fifo_y, label=f"Baseline (FIFO) - Avg: {avg_fifo:.2f} ms", color='red', s=5, alpha=0.7)
-    plt.scatter(qos_x, qos_y, label=f"Solution (QoS) - Avg: {avg_qos:.2f} ms", color='blue', s=5, alpha=0.7)
-    
+    for i, (label, stats) in enumerate(stats_list):
+        
+        # Unzip the data for plotting
+        x_data = [d[0] for d in stats.video_latencies]
+        y_data = [d[1] for d in stats.video_latencies]
+        
+        avg_latency = stats.get_average_video_latency()
+        color = colors[i % len(colors)]
+        
+        print(f"{label} Average Video Latency: {avg_latency:.2f} ms")
+        
+        plt.scatter(x_data, y_data, 
+                    label=f"{label} - Avg: {avg_latency:.2f} ms", 
+                    color=color, s=5, alpha=0.7)
+        
+        if y_data:
+            max_y_seen = max(max_y_seen, max(y_data))
+
     # Highlight the congestion period
     start, end = congestion_period
     plt.axvspan(start, end, color='gray', alpha=0.2, label='Network Congestion (Download Active)')
@@ -53,8 +60,18 @@ def plot_results(fifo_stats, qos_stats, congestion_period):
     plt.legend()
     plt.grid(True)
     
-    max_y = max(qos_y) * 4 if qos_y else 200
-    plt.ylim(0, max(max_y, 200))
+    # Set Y-limit based on the highest *non-FIFO* spike
+    # This keeps the plot readable.
+    max_y = 200 # Default
+    if len(stats_list) > 1:
+        # Find max of all *except* the first one (FIFO)
+        non_fifo_max = 0
+        for label, stats in stats_list[1:]:
+            if stats.video_latencies:
+                non_fifo_max = max(non_fifo_max, max(d[1] for d in stats.video_latencies))
+        max_y = max(non_fifo_max * 4, 200) # Show 4x the max QoS latency
+    
+    plt.ylim(0, max_y)
     
     print("\nPlot window is opening...")
     plt.show()
